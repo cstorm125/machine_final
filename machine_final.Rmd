@@ -1,0 +1,103 @@
+---
+title: "Predicting Human Activities from Weight Lifting Exercise"
+author: "Charin Polpanumas"
+date: "February 11, 2559 BE"
+output: 
+    html_document:
+        toc: yes
+        theme: spacelab
+
+---
+# Executive Summary
+This report aims to predicts human activities from the [Weight Lifting Exercise Dataset](http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises). Cleaning the dataset resulted in 52 features used to predict the activity class (classe), 19,622 observations for the training and validation sets (split 60/40) and 20 observations for the test set. We perform random forest classification, boosted general linear model, support vector machine, and a stacked model of all above on the training dataset using random forest classification. As a result, the stacked model has the highest accuracy rate of 99.16% (validation). However, considering the complexity tradeoff, we opt for the random forest model with accuracy rate of 99.11% (validation).
+
+# Data Processing
+## Download and Reaad
+Download and read training (pml) and testing sets. Set seed for reproducibility.
+```{r}
+set.seed(1412)
+trainname<-'pml-training.csv'
+testname<-'pml-testing.csv'
+if (!file.exists(trainname)) download.file(url='https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv',
+              destfile =trainname)
+if (!file.exists(testname)) 
+download.file(url='https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv',
+              destfile =testname)
+
+pml<-read.csv('pml-training.csv',na.strings = c("NA", "",'#DIV/0!'))
+testing <-read.csv('pml-testing.csv',na.strings = c("NA", "",'#DIV/0!'))
+```
+
+## Cleaning
+Clean both pml and testing by the following procedures. This result in 53 variables for the tidy datasets.
+
+* Remove id (X), user names (user_name), timestamps (raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, windows (new_window, num_window)
+```{r}
+pml<-pml[,8:160]
+testing<-testing[,8:160]
+```
+
+* Remove variables where percentages of NAs are exceptionally high (We set threshold at 80% but it turns out all high-NA variables are 97.93% NAs)
+```{r}
+na_index<-c()
+for (i in names(pml)) na_index<-c(na_index,sum(is.na(pml[,i]))/length(pml[,i]))
+not_na<-ifelse(na_index>0.80,FALSE,TRUE)
+pml<-pml[,not_na]
+testing<-testing[,not_na]
+```
+
+## Spliting into Training, Validation and Testing
+Subset the training set into training and validation sets at 60/40 ratio on the classe variable.
+```{r}
+require(caret)
+inTrain<-createDataPartition(pml$classe,p=0.6,list=FALSE)
+training<-pml[inTrain,]
+validation<-pml[-inTrain,]
+```
+
+# Modeling
+
+The goal is to classifiy the activity classe varaible (classe), consisting of A, B, C, D and E. We perform random forest classification, boosted general linear model, support vector machine, and a stacked model of all above on the training dataset using random forest classification. This way we attack the classification problem from different angles. 5-fold cross validation is applied to the algorithms when needed.
+
+## Random Forest Classification
+```{r,cache=TRUE,results='hide'}
+b25Control<-trainControl(method='cv',number=5,allowParallel = TRUE)
+fit_fr <- train(classe~.,data=training,method='rf',trControl=b25Control)
+pred_fr <-predict(fit_fr,validation)
+```
+```{r}
+confusionMatrix(pred_fr,validation$classe)
+```
+## Boosted General Linear Model
+```{r,cache=TRUE,results='hide'}
+fit_gbm <- train(classe~.,data=training,method='gbm',trControl=b25Control)
+pred_gbm <-predict(fit_gbm,validation)
+```
+```{r}
+confusionMatrix(pred_gbm,validation$classe)
+```
+## Support Vector Machine
+```{r,cache=TRUE,results='hide'}
+require(e1071)
+fit_svm <- svm(classe~.,data=training,trControl=b25Control)
+pred_svm <-predict(fit_svm,validation)
+```
+```{r}
+confusionMatrix(pred_svm,validation$classe)
+```
+## Stacked Model
+```{r,cache=TRUE, results='hide'}
+predDF <-data.frame(pred_fr,pred_gbm,pred_svm,classe=validation$classe)
+fit_stacked <- train(classe~.,data=predDF,method='rf',trControl=b25Control)
+pred_stacked<-predict(fit_stacked,validation)
+```
+```{r}
+confusionMatrix(pred_stacked,validation$classe)
+```
+## Testing
+
+Then we test the prediction of each model on the validation dataset, and choose the random forest model to perform an out-of-sample test on the test dataset. We expect the out-of-sample error to be at similar level as that of the validation set, which is 0.89%. The prediction for 20 problems in the testing set is as follows:
+```{r,cache=TRUE}
+pred_fr_test<-predict(fit_fr,testing)
+pred_fr_test
+```
